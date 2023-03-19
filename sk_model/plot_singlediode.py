@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 
 """
-Calculating a module's IV curves
-================================
+CEC parameters extraction automation
 
-Examples of modeling IV curves using a single-diode circuit equivalent model.
+Modeling IV curves using a single-diode circuit equivalent model
+================================================================
+Given a list of module search criteria using a parameter filter,
+retrieve all PV modules from different manufacturers matching to the search criteria
+then
+calculate the simulated Max Power Point (MPP) under the STC conditions (1000 irradiance W/m2 and 55 deg C)
+and
+compare to the given MPP known from the manufacturer datasheet to get the error percentage
+
+We can then assign a quality score to different brands based on the automated data-driven approach
+
 """
 
 # %%
@@ -29,7 +38,7 @@ Examples of modeling IV curves using a single-diode circuit equivalent model.
 #
 # Calculating IV Curves
 # -----------------------
-# This example uses :py:meth:`pvlib.pvsystem.calcparams_desoto` to calculate
+# This file uses :py:meth:`pvlib.pvsystem.calcparams_desoto` to calculate
 # the 5 electrical parameters needed to solve the single-diode equation.
 # :py:meth:`pvlib.pvsystem.singlediode` is then used to generate the IV curves.
 
@@ -39,12 +48,26 @@ import matplotlib.pyplot as plt
 import urllib, json
 from pv_base import PVBase
 
+# Static csv files from data folder installed with pvLib-python (v0.9.4)
+# Replace following calls with PV Free A public API for PV modeling parameters
 cec_modules = pvsystem.retrieve_sam('CECMod')
 cec_inverters = pvsystem.retrieve_sam('cecinverter')
 cec_inverter = cec_inverters['ABB__MICRO_0_25_I_OUTD_US_208__208V_']
 
 
 def get_total_pv_numbers():
+    """
+    Retrieve the total number of PV modules available from PV Free hosted in Azure
+
+    Parameters
+    ----------
+    filter : integer
+        source current Isc less than 60A (arbitrary high value so all moduel will fall below this)
+
+    Returns
+    -------
+    total_number : number of modules
+    """
     params = urllib.parse.urlencode({
         # 'STC__gt': 219, 'STC__lt': 221,
         'I_sc_ref__lt': 60})
@@ -53,22 +76,42 @@ def get_total_pv_numbers():
     print(f"\n\nTotal count of all modules with Isc < 60 A: {total_number['meta']['total_count']}")
 
 
-def get_modules(params):
-    with urllib.request.urlopen(f'https://pvfree.azurewebsites.net/api/v1/cecmodule/?{params}') as fp:
+def get_cecmodules(pv_params, limits=200):
+    """
+    Retrieve PV modules based on filter criteria
+
+    Parameters
+    ----------
+    pv_params: dict of criteria
+        manufacturer: name, Power Lower: integer, Upper: integer, Isc : integer
+
+    Returns
+    -------
+    list of devices : dict
+    """
+    with urllib.request.urlopen(f'https://pvfree.azurewebsites.net/api/v1/cecmodule/?{pv_params}&limit={limits}') as fp:
         module_used = json.load(fp)
 
+    param1 = pv_params.split("=")
+    I_sc = param1[3]
+    Watt = int((int(param1[1].split("&")[0]) + int(param1[2].split("&")[0])) / 2)
     # print(type(module_used))
-    print(f"\n\nTotal count of Canadian Solar 220-W with Isc < 6A: {module_used['meta']['total_count']}")
+    print(f"\n\nTotal number of PV modules" + " ({}W and ".format(Watt) +
+          "Isc < {}A) ".format(I_sc) + " = {}".format(module_used['meta']['total_count']))
 
     if module_used['meta']['total_count'] == 0:
         print("No module found from searching criteria .... ")
         exit(0)
     else:
-        for i in range(module_used['meta']['total_count']):
-            print(module_used['objects'][i])
+        print(f"====================================================================")
+        total_modules = module_used['meta']['total_count']
+        for i in range(total_modules):
+            print("({}) ".format(i+1) + module_used['objects'][i]['Name'])
+        print(f"====================================================================\n")
 
-    use_module = module_used['objects'][0]
-    return use_module
+    # use_module = module_used['objects'][0]
+    use_modules = module_used['objects']
+    return use_modules
 
 
 class PVPerfTest(PVBase):
@@ -79,11 +122,13 @@ class PVPerfTest(PVBase):
     def set_test_params(self):
         """Override test parameters for your individual test.
 
-        This method must be overridden and num_nodes must be exlicitly set."""
+        This method must be overridden and num_nodes must be explicitly set."""
         self.setup_clean_chain = True
 
-    def get_result(self, use_module):
-        # Example module parameters for input module:
+    def extract_module_params(self, use_module):
+        """Extract module parameters from cec_module
+
+        This method must be overridden and num_nodes must be explicitly set."""
         parameters = {
             # 'Name': self.name,
             'Name': use_module['Name'],
@@ -110,20 +155,48 @@ class PVPerfTest(PVBase):
             # 'Technology': 'Mono-c-Si',
             'Technology': use_module['Technology'],
         }
+        return parameters
 
-        cases = [
-            (1000, 55),
-            (800, 55),
-            (600, 55),
-            (400, 25),
-            (400, 40),
-            (400, 55)
-        ]
+    def draw_arrow(self, ax, label, x0, y0, rotation, size, direction):
+        """Draw trend arrows
 
-        conditions = pd.DataFrame(cases, columns=['Geff', 'Tcell'])
+        This method must be overridden and num_nodes must be explicitly set."""
+        style = direction + 'arrow'
+        bbox_props = dict(boxstyle=style, fc=(0.8, 0.9, 0.9), ec="b", lw=1)
+        t = ax.text(x0, y0, label, ha="left", va="bottom", rotation=rotation,
+                    size=size, bbox=bbox_props, zorder=-1)
+
+        bb = t.get_bbox_patch()
+        bb.set_boxstyle(style, pad=0.6)
+
+    def calcuate_errors(self, curve_info, parameters):
+        """Draw trend arrows
+
+        This method must be overridden and num_nodes must be explicitly set."""
+        # print(pd.DataFrame({ 'p_mp': curve_info['p_mp'], }))
+        p_mp = pd.DataFrame({'p_mp': curve_info['p_mp']}).to_dict().popitem()
+        print(p_mp)
+        # print(type(p_mp[1]))
+        print("\nManufacturer = "
+              + parameters['Name'] + "  {:.0f}-Watts".format(self.use_watt) + " (" + parameters['Technology'] + ")")
+
+        mpp = p_mp[1][0]  # first element on the dict
+        print("Mpp simulated for 'Geff = 1000 W/m^2' 'Tcell = 55C' : {:.0f} Watts".format(mpp))
+
+        diff = mpp / self.use_watt
+        diff_percent = (1-diff) * 100
+        print("\nError : {:.1f} %".format(diff_percent))
+        return diff_percent
+
+    def calculate_result(self, input_module, irrad_temps, plot_graph=False):
+        # module parameters for input module:
+        parameters = self.extract_module_params(input_module)
+
+        # express five primary parameters as a function of cell temperature and total absorbed irradiance
+        conditions = pd.DataFrame(irrad_temps, columns=['Geff', 'Tcell'])
 
         # adjust the reference parameters according to the operating
-        # conditions using the De Soto model:
+        # conditions using the De Soto (five-parameters) model.
         IL, I0, Rs, Rsh, nNsVth = pvsystem.calcparams_desoto(
             conditions['Geff'],
             conditions['Tcell'],
@@ -148,41 +221,31 @@ class PVPerfTest(PVBase):
             method='lambertw'   # lambertw, newton or brentq
         )
 
-        # draw trend arrows
-        def draw_arrow(ax, label, x0, y0, rotation, size, direction):
-            style = direction + 'arrow'
-            bbox_props = dict(boxstyle=style, fc=(0.8, 0.9, 0.9), ec="b", lw=1)
-            t = ax.text(x0, y0, label, ha="left", va="bottom", rotation=rotation,
-                        size=size, bbox=bbox_props, zorder=-1)
+        if plot_graph:
+            # plot the calculated curves:
+            plt.figure()
+            # draw arrow for increasing values
+            ax = plt.gca()
+            self.draw_arrow(ax, 'Irradiance', 20, 2.5, 90, 13, 'r')
+            self.draw_arrow(ax, 'Temperature', 35, 1, 0, 13, 'l')
 
-            bb = t.get_bbox_patch()
-            bb.set_boxstyle(style, pad=0.6)
+            for i, case in conditions.iterrows():
+                label = (
+                    "$G_{eff}$ " + f"{case['Geff']} $W/m^2$\n"
+                    "$T_{cell}$ " + f"{case['Tcell']} $\\degree C$"
+                )
+                plt.plot(curve_info['v'][i], curve_info['i'][i], label=label)
+                v_mp = curve_info['v_mp'][i]
+                i_mp = curve_info['i_mp'][i]
+                # mark the MPP
+                plt.plot([v_mp], [i_mp], ls='', marker='o', c='k')
 
-        # plot the calculated curves:
-        plt.figure()
-
-        # draw arrow for increasing values
-        ax = plt.gca()
-        draw_arrow(ax, 'Irradiance', 20, 2.5, 90, 13, 'r')
-        draw_arrow(ax, 'Temperature', 35, 1, 0, 13, 'l')
-
-        for i, case in conditions.iterrows():
-            label = (
-                "$G_{eff}$ " + f"{case['Geff']} $W/m^2$\n"
-                "$T_{cell}$ " + f"{case['Tcell']} $\\degree C$"
-            )
-            plt.plot(curve_info['v'][i], curve_info['i'][i], label=label)
-            v_mp = curve_info['v_mp'][i]
-            i_mp = curve_info['i_mp'][i]
-            # mark the MPP
-            plt.plot([v_mp], [i_mp], ls='', marker='o', c='k')
-
-        plt.legend(loc=(0.86, 0.36))
-        plt.xlabel('Module voltage [V]')
-        plt.ylabel('Module current [A]')
-        plt.title(parameters['Name'] + " (" + parameters['Technology'] + ")")
-        plt.show()
-        plt.gcf().set_tight_layout(True)
+            plt.legend(loc=(0.86, 0.36))
+            plt.xlabel('Module voltage [V]')
+            plt.ylabel('Module current [A]')
+            plt.title(parameters['Name'] + " (" + parameters['Technology'] + ")")
+            plt.show()
+            # plt.gcf().set_tight_layout(True)
 
         print(pd.DataFrame({
             'i_sc': curve_info['i_sc'],
@@ -192,33 +255,47 @@ class PVPerfTest(PVBase):
             'p_mp': curve_info['p_mp'],
         }))
 
-        # print(pd.DataFrame({ 'p_mp': curve_info['p_mp'], }))
-        p_mp = pd.DataFrame({'p_mp': curve_info['p_mp']}).to_dict().popitem()
-        # print(type(p_mp))
-        print(p_mp)
-        # print(type(p_mp[1]))
-        print("\nManufacturer = "
-              + parameters['Name'] + "  {:.0f}-Watts".format(self.use_watt) + " (" + parameters['Technology'] + ")")
-
-        mpp = p_mp[1][0]   # first element on the dict
-        print("Mpp simulated for 'Geff = 1000 W/m^2' 'Tcell = 55C' : {:.0f} Watts".format(mpp))
-
-        diff = mpp/self.use_watt
-        print("\nError : {:.1f} %".format((1-diff)*100))
+        return curve_info, parameters
 
     def run_test(self):
-        get_total_pv_numbers()
-        self.STC_Low= 219
-        self.STC_Hi = 221
+        # get_total_pv_numbers()  # 21187
+        self.STC_Low= 219 #59 #219
+        self.STC_Hi = 221 #61 #221
         self.use_watt = (self.STC_Hi + self.STC_Low) / 2
         self.name = "Canadian Solar "
         params = urllib.parse.urlencode({
-            'Name__istartswith': 'canadian',
+            # 'Name__istartswith': 'canadian',
             'STC__gt': self.STC_Low, 'STC__lt': self.STC_Hi,
             'I_sc_ref__lt': 6})
 
-        use_module = get_modules(params)
-        self.get_result(use_module)
+        cases = [
+            (1000, 55), (800, 55), (600, 55), (400, 25), (400, 40), (400, 55)
+        ]
+
+        max_returns = 200
+        cec_modules = get_cecmodules(params, max_returns)
+
+        device_errors = []
+        for index in range(len(cec_modules)):
+            curve_info, parameters = self.calculate_result(cec_modules[index], cases)
+            calculated_errs = self.calcuate_errors(curve_info=curve_info, parameters=parameters)
+            name = str(parameters['Name'])
+            device_errors.append((name, calculated_errs))
+            # print(name + "Error % = {:.1f} %".format(calculated_errs))
+
+        # print(device_errors)
+        print("\n")
+        for name, err in device_errors:
+            print(name + " [Error = {:.1f}%]".format(err))
+
+        # (1) Same Power (220W 100W 80W)
+        # (2) for loop to get different manufacturer (same Power)
+        # calculate mpp for each and calculate error %
+        # plots (a) Error vs Brand - for 200W
+        # plots (b) Error vs Brand - for 100W
+
+        # Assign a Quality score for each brand
+        # (Manufacture, Mpp, Error Diff, Quality_Score)
 
 
 if __name__ == '__main__':
