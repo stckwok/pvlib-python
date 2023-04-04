@@ -5,6 +5,8 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from pv_base import PVBase
 # from geopy.geocoders import Nominatim
+from tkinter import *
+import sys, getopt
 
 # a "typical meteorological year" (TMY) is composed of individual months
 # from several years, but to run a simulation we need
@@ -49,14 +51,35 @@ INVERTER_60K = INVERTERS['SMA_America__STP_60_US_10__480V_']
 # or
 # Use geopy APIs  (can not find it within IDE)
 
-LATITUDE, LONGITUDE = 40.5137, -108.5449
+# LATITUDE, LONGITUDE = 40.5137, -108.5449
 #LATITUDE, LONGITUDE = 49.194793, -123.182710   # Vancouver International Airport
 #LATITUDE, LONGITUDE = 40.642422, -73.781749    # New York Airport
 #LATITUDE, LONGITUDE = 22.312130, 113.924857    # 1 Sky Plaza Rd, Chek Lap Kok, Hong Kong
 # LATITUDE, LONGITUDE = 63.995339, -22.623854   # Iceland Airport
-LATITUDE, LONGITUDE, LOCATION = 51.504473, 0.052271, "London Airport"       # London Airport
+# LATITUDE, LONGITUDE, LOCATION = 51.504473, 0.052271, "London Airport"       # London Airport
 # LATITUDE, LONGITUDE = 29.241639, 47.972874, "Newzealand Airport"
 # LATITUDE, LONGITUDE = 25.252747, 55.361275, "Dubai Airport"
+
+address = ""
+
+
+def main(argv):
+    address = ''
+    try:
+        opts, args = getopt.getopt(argv, "ha:d:n:p:", ["ifile=", "ofile=", "lfile", "pfile"])
+    except getopt.GetoptError:
+        print("pv_modeling.py -a <address>")
+        sys.exit(2)
+    for opt, arg in opts:
+        if opt == '-h':
+            print("pv_modeling.py -a <address>")
+            # print_usages()
+            sys.exit()
+        elif opt in ("-a", "--ifile"):
+            address = arg
+
+    print("Address = ", address)
+    return address
 
 
 class PVModeling(PVBase):
@@ -102,7 +125,7 @@ class PVModeling(PVBase):
 
         def plot_dc_energy(self, technology, mpp, longitude, latitude, location):
             mpp.p_mp.resample('D').sum().plot(figsize=(12, 8),
-                        label='{} -> Lontitude={}  Latitude={} '.format(location, str(longitude), str(latitude)),
+                        label='{} -> Longitude={}  Latitude={} '.format(location, str(longitude), str(latitude)),
                         title='Daily Energy ( {} )'.format(technology))
             plt.legend()
             plt.ylabel('Production [Wh]')
@@ -145,13 +168,79 @@ class PVModeling(PVBase):
             AC_OUTPUT.max()
             return EDAILY, AC_OUTPUT
 
-        def test_1(self, cec_technology, location, latitude=LATITUDE, longitude=LONGITUDE):
+        def get_location_coordinate(self, coordinates):
+            # from tkinter import *
+            from geopy.geocoders import Nominatim
+            #
+            # Create an instance of tkinter frame
+            win = Tk()
+
+            # Define geometry of the window
+            win.geometry("700x350")
+
+            # Initialize Nominatim API
+            geolocator = Nominatim(user_agent="MyApp")
+
+            # Latitude & Longitude input
+            # coordinates = "49.194793, -123.182710"
+
+            location = geolocator.reverse(coordinates)
+
+            address = location.raw['address']
+
+            # Traverse the data
+            city = address.get('city', '')
+            state = address.get('state', '')
+            country = address.get('country', '')
+
+            # Create a Label widget
+            label1 = Label(text="Given Latitude and Longitude: " + coordinates, font=("Calibri", 24, "bold"))
+            label1.pack(pady=20)
+            label2 = Label(text="The city is: " + city, font=("Calibri", 24, "bold"))
+            label2.pack(pady=20)
+            label3 = Label(text="The state is: " + state, font=("Calibri", 24, "bold"))
+            label3.pack(pady=20)
+            label4 = Label(text="The country is: " + country, font=("Calibri", 24, "bold"))
+            label4.pack(pady=20)
+            win.mainloop()
+
+        def get_location_from_address(self, address):
+            # from tkinter import *
+            from geopy.geocoders import Nominatim
+
+            # Create an instance of tkinter frame
+            win = Tk()
+
+            # Define geometry of the window
+            win.geometry("700x350")
+
+            # Initialize Nominatim API
+            geolocator = Nominatim(user_agent="MyApp")
+
+            location = geolocator.geocode(address)
+
+            print("The latitude of the location is: ", location.latitude)
+            print("The longitude of the location is: ", location.longitude)
+
+            lat = location.latitude
+            long = location.longitude
+
+            label1 = Label(text="The location is: " + address, font=("Calibri", 24, "bold"))
+            label1.pack(pady=20)
+            label2 = Label(text="The latitude is: " + str(lat), font=("Calibri", 24, "bold"))
+            label2.pack(pady=20)
+            label3 = Label(text="The longitude is: " + str(long), font=("Calibri", 24, "bold"))
+            label3.pack(pady=20)
+            win.mainloop()
+            return lat, long
+
+        def test_1(self, cec_technology, location, latitude, longitude):
             # get some weather, before we used TMY, and then get some data from PVGIS
-            data, months, inputs, meta = pvlib.iotools.get_pvgis_tmy(latitude=LATITUDE, longitude=LONGITUDE)
+            data, months, inputs, meta = pvlib.iotools.get_pvgis_tmy(latitude, longitude, map_variables=False)
 
             # 1. get solar position
             data.index = TIMES
-            solar_zenith, solar_azimuth = self.get_solar_position(LATITUDE, LONGITUDE)
+            solar_zenith, solar_azimuth = self.get_solar_position(latitude, longitude)
 
             # 2. get tracker positions
             surface_tilt, surface_azimuth, aoi = self.get_tracker_position(solar_zenith, solar_azimuth)
@@ -194,13 +283,17 @@ class PVModeling(PVBase):
             self.plot_dc_ac_energy(cec_technology["Technology"], edaily, ac_output)
 
         def run_test(self):
-                cec_technology = CECMOD_MONO_1
-                # location = LOCATION
-                self.test_1(cec_technology, location=LOCATION, latitude=LATITUDE, longitude=LONGITUDE)
+            cec_technology = CECMOD_MONO_1
+            # coordinates = "49.194793, -123.182710"   # vancouver
+            # self.get_location_coordinate(coordinates)
 
-                cec_technology = CECMOD_POLY_1
-                self.test_1(cec_technology, location=LOCATION, latitude=LATITUDE, longitude=LONGITUDE)
+            lat, long = self.get_location_from_address(address)   # use global from input argv
+            self.test_1(cec_technology, location=address, latitude=lat, longitude=long)
+
+            cec_technology = CECMOD_POLY_1
+            self.test_1(cec_technology, location=address, latitude=lat, longitude=long)
 
 
 if __name__ == '__main__':
+    address = main(sys.argv[1:])   # set global
     PVModeling().main()
