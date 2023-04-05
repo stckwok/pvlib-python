@@ -34,6 +34,7 @@ INVERTERS = pvlib.pvsystem.retrieve_sam('CECInverter')
 # https://www.pvxchange.com/Solar-Modules/Canadian-Solar/MaxPower-CS6X-300P_1-2106189
 # https://www.pvxchange.com/Solar-Modules/Canadian-Solar/MaxPower-CS6X-300M_1-2108905
 
+# monocrystalline and polycrystalline solar
 CECMOD_POLY_1 = CECMODS['Canadian_Solar_Inc__CS6X_300P']
 CECMOD_MONO_1 = CECMODS['Canadian_Solar_Inc__CS6X_300M']
 # CS1H-325MS
@@ -111,9 +112,16 @@ class PVModeling(PVBase):
             sp = pvlib.solarposition.get_solarposition(TIMES, latitude, longitude)
             solar_zenith = sp.apparent_zenith.values
             solar_azimuth = sp.azimuth.values
+            # sp.plot()
+            # plt.legend()
+            # plt.grid()
+            # plt.show()
+
             return solar_zenith, solar_azimuth
 
         def get_tracker_position(self, solar_zenith, solar_azimuth):
+            # The angle of incidence (AOI) calculations require
+            # surface_tilt, surface_azimuth and the extrinsic sun position
             tracker = pvlib.tracking.singleaxis(solar_zenith, solar_azimuth)
             surface_tilt = tracker['surface_tilt']
             surface_azimuth = tracker['surface_azimuth']
@@ -121,6 +129,7 @@ class PVModeling(PVBase):
             return surface_tilt, surface_azimuth, aoi
 
         def get_irradiance(self, data):
+            # Direct Normal, Global Horizontal, Diffuse Horizontal Irradiance
             dni = data['Gb(n)'].values
             ghi = data['G(h)'].values
             dhi = data['Gd(h)'].values
@@ -139,12 +148,13 @@ class PVModeling(PVBase):
                         title='Daily Energy ( {} )'.format(technology))
             plt.legend()
             plt.ylabel('Production [Wh]')
+            plt.grid()
             plt.show()
 
-        def plot_dc_ac_energy(self, technology, edaily, ac_output):
+        def plot_dc_ac_energy(self, technology, location, edaily, ac_output):
             plt.rcParams['font.size'] = 14
             ax = edaily.resample('D').sum().plot(figsize=(12, 8), label='DC',
-                                                 title='Daily Energy ( {} )'.format(technology))
+                                                 title='Yearly Energy ( {} - {} )'.format(technology, location))
             ac_output.resample('D').sum().plot(ax=ax, label='AC')
             plt.ylabel('Energy [Wh/day]')
             plt.legend()
@@ -158,6 +168,7 @@ class PVModeling(PVBase):
             mpp2.p_mp.resample('D').sum().plot(figsize=(12, 8), label=tech2)
             plt.legend()
             plt.ylabel('Production [Wh]')
+            plt.grid()
             plt.show()
 
         def build_pv_array(self, cec_technology, temp_air, mpp):
@@ -189,11 +200,12 @@ class PVModeling(PVBase):
 
         def get_location_coordinate(self, coordinates):
             # from tkinter import *
-            from geopy.geocoders import Nominatim
+
             #
             # Create an instance of tkinter frame
             win = Tk()
 
+            from geopy.geocoders import Nominatim
             # Define geometry of the window
             win.geometry("700x350")
 
@@ -225,11 +237,11 @@ class PVModeling(PVBase):
 
         def get_location_from_address(self, address):
             # from tkinter import *
-            from geopy.geocoders import Nominatim
 
             # Create an instance of tkinter frame
             win = Tk()
 
+            from geopy.geocoders import Nominatim
             # Define geometry of the window
             win.geometry("700x350")
 
@@ -307,12 +319,15 @@ class PVModeling(PVBase):
 
             # 8. calculate AC output
             edaily, ac_output = self.build_pv_array(cec_technology, temp_air, mpp)
-            self.plot_dc_ac_energy(cec_technology["Technology"], edaily, ac_output)
+            self.plot_dc_ac_energy(cec_technology["Technology"], location, edaily, ac_output)
 
         def run_test(self):
             cec_technology = CECMOD_MONO_1
             # coordinates = "49.194793, -123.182710"   # vancouver
             # self.get_location_coordinate(coordinates)
+
+            # LATITUDE, LONGITUDE = 25.252747, 55.361275,   # Dubai Airport
+            # lat, long = 25.252747, 55.361275
 
             lat, long = self.get_location_from_address(address)   # use global from input argv
             self.test_1(cec_technology, location=address, latitude=lat, longitude=long)
